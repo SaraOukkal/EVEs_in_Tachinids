@@ -1,0 +1,74 @@
+#Commande :
+##Dryrun : 
+#nohup snakemake -j 200 -s Snakemake_TE_search -n --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads} -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_TE_search.out &
+##Unlock : 
+#nohup snakemake -j 200 -s Snakemake_TE_search --unlock --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads} -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_TE_search.out &
+##Real run : 
+#nohup snakemake -j 200 -s Snakemake_TE_search --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads} -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_TE_search.out &
+
+import pandas as pd
+import re
+import os
+
+#Your softs
+mmseqs2="/beegfs/data/soukkal/TOOLS/mmseqs/bin/mmseqs" #(version 5daca424b162cc5fdf0b9cd151aebed86975cbf6)
+
+#Your paths
+Genomes_paths="/beegfs/data/soukkal/Thesis/Tachinid_Project/Assembly/Genomes/"
+Output_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Genomic_environment/TE/"
+Logs_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Genomic_environment/TE/Logs/"
+DB_dir="/beegfs/data/soukkal/Thesis/Databases/"
+
+Genome_IDS_table=pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/All_species_list.txt",header=None)
+list_Genome_IDs=list(Genome_IDS_table[0])
+
+#This rule contains all the expected output from all your rules within the snakefile
+rule all:
+        input:
+                DB_dir+"RepeatPeps",
+                expand(Output_dir+"{Genome_ID}/result_mmseqs2.m8", Genome_ID = list_Genome_IDs)
+
+#First create the TE db :
+rule Create_TE_db:
+        params:
+                threads="1",
+                time="00:10:00",
+                name="CreateDB",
+                mem="2000M",
+                out=Logs_dir+"CreateDB.out",
+                err=Logs_dir+"CreateDB.error"
+        input:
+                DB=DB_dir+"RepeatPeps.faa"
+        output:
+                mmseqs_DB=DB_dir+"RepeatPeps"
+        shell:
+                """
+                {mmseqs2} createdb {input.DB} {output.mmseqs_DB}
+                """
+
+#Then run the BlastX (Mmseqs2) with Genomes as queries and RepeatPeps as database
+rule Homology_analysis:
+        params:
+                threads="20",
+                time="06:00:00",
+                mem="5G",
+                name="Mmseqs2_{Genome_ID}",
+                out=Logs_dir+"{Genome_ID}_Mmseqs2_ET_search.out",
+                err=Logs_dir+"{Genome_ID}_Mmseqs2_ET_search.error"
+        input:
+                ETDB=DB_dir+"RepeatPeps",
+                Genomedb=Genomes_paths+"{Genome_ID}.fa"
+        output:
+                out=Output_dir+"{Genome_ID}/result_mmseqs2.m8"
+        shell:
+                """
+                #Create a directory where the BlastX results will be written
+                mkdir -p {Output_dir}{wildcards.Genome_ID}/
+                #Create the query database (for each query genome/sequence)
+                {mmseqs2} createdb {input.Genomedb} {Output_dir}{wildcards.Genome_ID}/{wildcards.Genome_ID}_mmseqs2_db
+                #Run Mmseqs2 search (BlastX equivalent, homology search between query and db)
+                {mmseqs2} search {Output_dir}{wildcards.Genome_ID}/{wildcards.Genome_ID}_mmseqs2_db {input.ETDB} {Output_dir}{wildcards.Genome_ID}/result_mmseqs2 {Output_dir}{wildcards.Genome_ID}/tpm -a -s 7.5 -e 0.01 --threads 20 --remove-tmp-files
+                #From the previous step you get one result file per thread, the next step will format the result column and also put together all the results in one file:
+                {mmseqs2} convertalis --format-output 'query,target,qstart,qend,tcov,evalue,bits' {Output_dir}{wildcards.Genome_ID}/{wildcards.Genome_ID}_mmseqs2_db {input.ETDB} {Output_dir}{wildcards.Genome_ID}/result_mmseqs2 {output.out}
+                """
+

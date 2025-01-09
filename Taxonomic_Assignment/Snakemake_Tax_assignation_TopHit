@@ -1,0 +1,76 @@
+##Before running this snakemake, make sure you created your taxnonomic database (use mmseqs createtaxdb), filter to remove diptera and hymenoptera clades using filtertaxdb, here schirzophora and apocrita and rerun the createtaxdb afterwards
+
+#Dryrun :
+#nohup snakemake -j 200 -s Snakemake_Tax_assignation_TopHit -n --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads}  -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_tax_assignation_TopHit.out &
+#Unlock :
+#nohup snakemake -j 200 -s Snakemake_Tax_assignation_TopHit --unlock --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads}  -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_tax_assignation_TopHit.out &
+#Real run :
+#nohup snakemake -j 200 -s Snakemake_Tax_assignation_TopHit --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads}  -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_tax_assignation_TopHit.out &
+
+import pandas as pd
+import re
+import os
+
+#Your softs
+mmseqs2="/beegfs/data/soukkal/TOOLS/mmseqs/bin/mmseqs" #(version 5daca424b162cc5fdf0b9cd151aebed86975cbf6)
+
+#Your paths
+Output_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Homology_search/"
+DB_dir="/beegfs/data/soukkal/Thesis/Databases/"
+Logs_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Homology_search/Logs/"
+
+#This rule contains all the expected output from all your rules within the snakefile
+rule all:
+        input:
+                Output_dir+"Filter_loci/TopHit/_lca.tsv",
+                Output_dir+"Filter_loci/TopHit/Filtered_loci_unclassified_virus.fna",
+                Output_dir+"Filter_loci/TopHit/Filtered_loci_unclassified_virus.faa"
+
+rule Taxonomy_assignment:
+        params:
+                threads="40",
+                time="96:00:00",
+                mem="50G",
+                name="Taxonomy_assignment",
+                out=Logs_dir+"Tax_assignment.out",
+                err=Logs_dir+"Tax_assignment.error"
+        input:
+                Loci=Output_dir+"Viral_loci/Candidate_viral_loci_and_viral_protein.aa",
+                Database=DB_dir+"Refseq_noschizophora_noapocrita"
+        output:
+                report=Output_dir+"Filter_loci/TopHit/_lca.tsv"
+        shell:
+                """
+                {mmseqs2} easy-taxonomy {input.Loci} {input.Database} {Output_dir}Filter_loci/TopHit/ {Output_dir}Filter_loci/TopHit/tmp_files --tax-lineage 1 --lca-mode 4
+                """
+
+rule Filter_loci:
+        params:
+                threads="2",
+                time="01:00:00",
+                mem="2000M",
+                name="Filter_loci",
+                out=Logs_dir+"Filter.out",
+                err=Logs_dir+"Filter.error"
+        input:
+                Tax_report=Output_dir+"Filter_loci/TopHit/_lca.tsv",
+                Fasta_aa=Output_dir+"Viral_loci/All_fasta_viral_loci.faa",
+                Fasta_nt=Output_dir+"Viral_loci/All_fasta_viral_loci.fna"
+        output:
+                Filtered_aa=Output_dir+"Filter_loci/TopHit/Filtered_loci_unclassified_virus.faa",
+                Filtered_nt=Output_dir+"Filter_loci/TopHit/Filtered_loci_unclassified_virus.fna"
+        shell:
+                """
+                #Filtrer les loci après l'assignement taxonomique de mmseqs Taxonomy
+                ##Récupérer les noms de locus assignés à des virus:
+                cat {input.Tax_report}  | cut -f1,4 | grep "virus" | cut -f1 > {Output_dir}Filter_loci/TopHit/Virus_loci_names.txt
+                ##Récupérer les noms de locus non assignés (car ils ont hit sur des virus précédement, donc la unclassified = Pas dans la BDD UniRef90)
+                cat {input.Tax_report} | cut -f1,4 | grep "unclassified" | cut -f1 > {Output_dir}Filter_loci/TopHit/Unclassified_loci_names.txt
+                ##Concaténer les deux listes :
+                cat {Output_dir}Filter_loci/TopHit/Virus_loci_names.txt {Output_dir}Filter_loci/TopHit/Unclassified_loci_names.txt >> {Output_dir}Filter_loci/TopHit/Unclassified_and_virus_loci_names.txt
+                ##Filtrer le fichier fasta d'AA :
+                /beegfs/home/soukkal/miniconda3/bin/seqkit grep -f {Output_dir}Filter_loci/TopHit/Unclassified_and_virus_loci_names.txt {input.Fasta_aa} > {output.Filtered_aa}
+                ##Filtrer le fichier fasta de nucléotides :
+                /beegfs/home/soukkal/miniconda3/bin/seqkit grep -f {Output_dir}Filter_loci/TopHit/Unclassified_and_virus_loci_names.txt {input.Fasta_nt} > {output.Filtered_nt}
+                """
+

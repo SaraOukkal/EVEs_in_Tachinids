@@ -1,0 +1,62 @@
+#Activate conda :
+## conda activate /beegfs/data/bguinet/Bguinet_conda
+
+#Command lines :
+##DRY run :
+#nohup snakemake -j 500  -s Snakemake_dNdS_analysis -n --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon  --exclude=pbil-deb27 " &> nohup_Snakemake_dNdS_analysis.out &
+##Unlock :
+#nohup snakemake -j 500  -s Snakemake_dNdS_analysis --unlock --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_dNdS_analysis.out &
+##Real run :
+#nohup snakemake -j 500  -s Snakemake_dNdS_analysis --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_dNdS_analysis.out &
+
+# Importation des packages nécessaires
+import re
+from Bio import SeqIO
+import os
+import pandas as pd
+
+# Chemins vers les fichiers
+##Phylogenies avec problèmes d'Iqtree symboles remplacés par "_", mais on garde comme ça, car sinon pas lu par ete3
+tree_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Alignment_Phylogenies/Phylogenies_for_dNdS/{cluster}.treefile"
+##Alignements codon trimmés mais corrigés pour les headers qui ont été tronqués par trimal 
+alignment_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Domestication/Ali_codon/{cluster}_NT.fna.aln.trimmed.restored"
+output_dir = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Domestication/dNdS_analysis/"
+EVEs_list_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Domestication/Events_EVEs_lists/{event_number}.txt"
+events_list_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Domestication/Events_list_filtered.txt"
+
+# Lire la liste des event_numbers
+with open(events_list_path) as f:
+    event_numbers = [line.strip() for line in f]
+
+# Règle all
+rule all:
+    input:
+        expand(f"{output_dir}dNds_{{event_number}}.out", event_number=event_numbers)
+
+# Règle dNdS_analysis
+rule dNdS_analysis:
+    params:
+        threads="1",
+        time="96:00:00",
+        mem="1G",
+        name=lambda wildcards: f"dNdS_{wildcards.event_number}",
+        out=lambda wildcards: f"{output_dir}Logs/dNdS_{wildcards.event_number}.out",
+        err=lambda wildcards: f"{output_dir}Logs/dNdS_{wildcards.event_number}.error",
+        cluster_name=lambda wildcards: wildcards.event_number.split("-")[0],
+        output_dir=output_dir
+    input:
+        tree=lambda wildcards: tree_path.format(cluster=wildcards.event_number.split("-")[0]),
+        alignment=lambda wildcards: alignment_path.format(cluster=wildcards.event_number.split("-")[0]),
+        EVEs_list=lambda wildcards: EVEs_list_path.format(event_number=wildcards.event_number)
+    output:
+        out_file=output_dir+"dNds_{event_number}.out"
+    shell:
+        """
+        python3 /beegfs/data/soukkal/Thesis/Tachinid_Project/Scripts/Domestication/dNdS_analysis.py \
+        --aln {input.alignment} \
+        --tree {input.tree} \
+        --output_dir {params.output_dir} \
+        --event_number {wildcards.event_number} \
+        --cluster_name {params.cluster_name} \
+        --EVEs_list {input.EVEs_list} 
+        """

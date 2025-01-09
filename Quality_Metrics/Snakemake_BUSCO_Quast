@@ -1,0 +1,115 @@
+#Commande :
+#conda activate /beegfs/data/bguinet/Bguinet_conda/
+
+import pandas as pd
+import re
+import os
+
+##DRY run :
+#nohup snakemake -j 500  -s Snakemake_BUSCO_Quast -n --cluster " sbatch -J {params.name} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon " &> nohup_Snakemake_BUSCO_D.out &
+##Unlock :
+#nohup snakemake -j 500  -s Snakemake_BUSCO_Quast --unlock --cluster " sbatch -J {params.name} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon " &> nohup_Snakemake_BUSCO_D.out &
+##Real run :
+#nohup snakemake -j 200  -s Snakemake_BUSCO_Quast --cluster " sbatch -J {params.name} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon " &> nohup_Snakemake_BUSCO_D.out &
+
+#Your paths
+Diptera_Genome_path="/beegfs/data/soukkal/Thesis/Tachinid_Project/Assembly/Genomes/"
+Tachinid_Genome_path="/beegfs/project/horizon/data/assembly/species/"
+Output_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Stats/"
+Logs_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Assembly/logs/"
+
+#Open species list :
+Diptera_IDS_table=pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/Species_list_diptera.txt",header=None)
+list_Diptera_IDs=list(Diptera_IDS_table[0])
+Tachinid_IDS_table=pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/Species_list_tachinid.txt",header=None)
+list_Tachinid_IDs=list(Tachinid_IDS_table[0])
+
+
+rule all:
+  input:
+        expand(Output_dir+"BUSCO/{Diptera_ID}/run_diptera_odb10/full_table.tsv", Diptera_ID = list_Diptera_IDs),
+        expand(Output_dir+"BUSCO/{Tachinid_ID}/run_diptera_odb10/full_table.tsv", Tachinid_ID = list_Tachinid_IDs),
+        expand(Output_dir+"Quast/{Diptera_ID}/report.tsv", Diptera_ID = list_Diptera_IDs),
+        expand(Output_dir+"Quast/{Tachinid_ID}/report.tsv", Tachinid_ID = list_Tachinid_IDs)
+
+#Run BUSCO analysis:
+rule BUSCO_D:
+  params:
+     threads="12",
+     time="18:00:00",
+     mem="12G",
+     name="BUSCO_{Diptera_ID}",
+     out=Logs_dir+"{Diptera_ID}_BUSCO.out",
+     err=Logs_dir+"{Diptera_ID}_BUSCO.error",
+     lineage="/beegfs/data/soukkal/Thesis/Tachinid_Project/Stats/BUSCO/busco_downloads/lineages/diptera_odb10",
+     mode="genome"
+  input:
+     Assembly=Diptera_Genome_path+"{Diptera_ID}.contigs.fa"
+  output:
+     BUSCO_result=Output_dir+"BUSCO/{Diptera_ID}/run_diptera_odb10/full_table.tsv"
+  shell:
+     """
+      hostname
+      cd /beegfs/data/soukkal/Thesis/Tachinid_Project/Stats/BUSCO/
+      /beegfs/data/soft/singularity3.11.0/bin/singularity exec --bind /beegfs/:/beegfs/ /beegfs/data/soft/containers/busco-v5.4.5.sif busco -i {Diptera_Genome_path}{wildcards.Diptera_ID}.contigs.fa -l {params.lineage} -m {params.mode} -o {wildcards.Diptera_ID}/ -c 3 -f
+     """
+
+#Run QUAST analysis:
+rule QUAST_D:
+  params:
+     threads="5",
+     time="00:20:00",
+     mem="1G",
+     name="QUAST_{Diptera_ID}",
+     out=Logs_dir+"{Diptera_ID}_QUAST.out",
+     err=Logs_dir+"{Diptera_ID}_QUAST.error"
+  input:
+     Genome_assembly=Diptera_Genome_path+"{Diptera_ID}.contigs.fa"
+  output:
+     Result=Output_dir+"Quast/{Diptera_ID}/report.tsv"
+  shell:
+     """
+     python3 /beegfs/data/soukkal/StageM2/Tools/quast/quast.py {Diptera_Genome_path}{wildcards.Diptera_ID}.contigs.fa -o {Output_dir}Quast/{wildcards.Diptera_ID}/ -t {params.threads}
+     cp {Output_dir}Quast/{wildcards.Diptera_ID}/report.tsv {Output_dir}Quast/Quast_sum/report_{wildcards.Diptera_ID}.tsv
+     """
+
+#Run BUSCO analysis:
+rule BUSCO_T:
+  params:
+     threads="12",
+     time="18:00:00",
+     mem="12G",
+     name="BUSCO_{Tachinid_ID}",
+     out=Logs_dir+"{Tachinid_ID}_BUSCO.out",
+     err=Logs_dir+"{Tachinid_ID}_BUSCO.error",
+     lineage="/beegfs/data/soukkal/Thesis/Tachinid_Project/Stats/BUSCO/busco_downloads/lineages/diptera_odb10",
+     mode="genome"
+  input:
+     Assembly=Tachinid_Genome_path+"{Tachinid_ID}/gnm.fna"
+  output:
+     BUSCO_result=Output_dir+"BUSCO/{Tachinid_ID}/run_diptera_odb10/full_table.tsv"
+  shell:
+     """
+      hostname
+      cd /beegfs/data/soukkal/Thesis/Tachinid_Project/Stats/BUSCO/
+      /beegfs/data/soft/singularity3.11.0/bin/singularity exec --bind /beegfs/:/beegfs/ /beegfs/data/soft/containers/busco-v5.4.5.sif busco -i {Tachinid_Genome_path}{wildcards.Tachinid_ID}/gnm.fna -l {params.lineage} -m {params.mode} -o {wildcards.Tachinid_ID}/ -c 3 -f
+     """
+
+#Run QUAST analysis:
+rule QUAST_T:
+  params:
+     threads="5",
+     time="00:20:00",
+     mem="1G",
+     name="QUAST_{Tachinid_ID}",
+     out=Logs_dir+"{Tachinid_ID}_QUAST.out",
+     err=Logs_dir+"{Tachinid_ID}_QUAST.error"
+  input:
+     Genome_assembly=Tachinid_Genome_path+"{Tachinid_ID}/gnm.fna"
+  output:
+     Result=Output_dir+"Quast/{Tachinid_ID}/report.tsv"
+  shell:
+     """
+     python3 /beegfs/data/soukkal/StageM2/Tools/quast/quast.py {Tachinid_Genome_path}{wildcards.Tachinid_ID}/gnm.fna -o {Output_dir}Quast/{wildcards.Tachinid_ID}/ -t {params.threads}
+     cp {Output_dir}Quast/{wildcards.Tachinid_ID}/report.tsv {Output_dir}Quast/Quast_sum/report_{wildcards.Tachinid_ID}.tsv
+     """

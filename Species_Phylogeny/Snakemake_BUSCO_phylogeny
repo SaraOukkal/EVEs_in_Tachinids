@@ -1,0 +1,102 @@
+#Activate conda :
+## conda activate /beegfs/data/bguinet/Bguinet_conda
+
+#Import python packages :
+import pandas as pd
+import re
+import os
+
+#Command lines :
+##DRY run :
+#nohup snakemake -j 320  -s Snakemake_BUSCO_phylogeny -n --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon  --exclude=pbil-deb27 " &> nohup_Snakemake_BUSCO_phylogeny.out &
+##Unlock :
+#nohup snakemake -j 320  -s Snakemake_BUSCO_phylogeny --unlock --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_BUSCO_phylogeny.out &
+##Real run :
+#nohup snakemake -j 320  -s Snakemake_BUSCO_phylogeny --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_BUSCO_phylogeny.out &
+
+#Software :
+Clustal_Omega="/beegfs/home/soukkal/miniconda3/bin/clustalo"
+Iqtree="/beegfs/home/soukkal//miniconda3/bin/iqtree"
+
+#Data pathways :
+BUSCO_Genes="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Species_Phylogeny/busco_nt/Genes_files/"
+Output_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Species_Phylogeny/"
+Logs_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Species_Phylogeny/Logs/"
+Scripts_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Scripts/Species_Phylogeny/"
+
+#Liste de gènes :
+Genes_table=pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Species_Phylogeny/final_busco_ids.txt",header=None)
+list_Genes=list(Genes_table[0])
+
+rule all:
+        input:
+                expand(Output_dir+"Alignments/{Gene}.fna.aln", Gene = list_Genes),
+                Output_dir+"Phylogeny/Concatenated_BUSCO_sequences.aln",
+                Output_dir+"Phylogeny/Species_phylogeny.treefile"
+
+
+#Aligner les fichiers BUSCO avec clustalo :
+rule Omega_Busco_alignment:
+  params:
+     threads="4",
+     time="10:00:00",
+     name="ClustalO_{Gene}",
+     out=Logs_dir+"{Gene}_ClustalO.out",
+     err=Logs_dir+"{Gene}_ClustalO.error"
+  input:
+     Busco_Gene=BUSCO_Genes+"{Gene}.fasta"
+  output:
+     Ali_Busco_Gene=Output_dir+"Alignments/{Gene}.fna.aln"
+  shell:
+     """
+     {Clustal_Omega} -v -i {input.Busco_Gene} --out {output.Ali_Busco_Gene} --threads {params.threads}
+     """
+
+#Regrouper les alignements par gène en un seul super gène et générer un fichier de partition
+rule BUSCO_concatenate:
+  params:
+     threads="2",
+     time="10:00:00",
+     name="BUSCO_concatenate",
+     out=Logs_dir+"BUSCO_concatenate.out",
+     err=Logs_dir+"BUSCO_concatenate.error"
+  input:
+     Ali_Busco_Gene=expand(Output_dir+"Alignments/{Gene}.fna.aln", Gene = list_Genes)
+  output:
+     BUSCO_partition=Output_dir+"Phylogeny/partition_BUSCO.txt",
+     BUSCO_partition2=Output_dir+"Phylogeny/partition_BUSCO.tab",
+     Concatenated_BUSCO_alignment=Output_dir+"Phylogeny/Concatenated_BUSCO_sequences.aln"
+  shell:
+     """
+     #Concatener les alignments de gènes en un seul supergène
+     #Generer un fichier partition qui aura pour chaque gene une ligne qui porte le nom du fichier, puis un start et end d'ou commence la partition dans le concatenat
+     perl {Scripts_dir}catfasta2phyml.pl -f --concatenate --verbose {Output_dir}Alignments/*.fna.aln > {output.Concatenated_BUSCO_alignment}  2> {output.BUSCO_partition} || true
+     #Transformer le fichier partition.txt en partition.tab pour qu'il puisse être lu par iqtree
+     ##Récupérer uniquement les lignes qui contiennent les coordonnées des gènes dans partition.txt (les premières lignes contiennent .fna.aln =)
+     grep '.fna.aln =' {output.BUSCO_partition} >> {output.BUSCO_partition2} || true
+     ##Retirer le chemin de dossier et remplacer par DNA, BUSCO_ pour spécifier le type de séquences
+     ###Ici les # servent de délimiter pour le sed, comme les / utilisés habituellement, mais puisqu'on a des / dans le chemin qu'on veut remplacer, on utiliser les # comme délimiteurs
+     sed -i 's#{Output_dir}Alignments/#DNA, BUSCO_#g' {output.BUSCO_partition2}
+     """
+
+#Faire inférence phylogénétique par maximum de vraisemblance des alignements de gènes BUSCO regroupés en un supergène
+rule BUSCO_phylogeny:
+  params:
+     threads="20",
+     time="48:00:00",
+     name="BUSCO_phylogeny",
+     out=Logs_dir+"BUSCO_concatenated_phylogeny.out",
+     err=Logs_dir+"BUSCO_concatenated_phylogeny.error"
+  input:
+     BUSCO_partition=Output_dir+"Phylogeny/partition_BUSCO.tab",
+     Concatenated_BUSCO_alignment=Output_dir+"Phylogeny/Concatenated_BUSCO_sequences.aln"
+  output:
+     Treefile_output=Output_dir+"Phylogeny/Species_phylogeny.treefile"
+  shell:
+     """
+     #Se mettre dans le dossier ou on veut écrire les outputs
+     cd {Output_dir}/Phylogeny/
+
+     #Iqtree pour générer l'arbre des espèces avec ultraboostap et alrt
+     {Iqtree} -s {input.Concatenated_BUSCO_alignment} -spp {input.BUSCO_partition} --prefix Species_phylogeny -m MFP -alrt 2500  -bb 2500 -bnni --symtest-remove-bad  -nt {params.threads}
+     """

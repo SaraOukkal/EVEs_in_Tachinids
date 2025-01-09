@@ -1,0 +1,56 @@
+#Activate conda :
+## conda activate /beegfs/data/bguinet/Bguinet_conda
+
+#Command lines :
+##DRY run :
+#nohup snakemake -j 500  -s Snakemake_align_clusters -n --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon  --exclude=pbil-deb27 " &> nohup_Snakemake_Cluster_ali.out &
+##Unlock :
+#nohup snakemake -j 500  -s Snakemake_align_clusters --unlock --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_Cluster_ali.out &
+##Real run :
+#nohup snakemake -j 500  -s Snakemake_align_clusters --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_Cluster_ali.out &
+
+# Importation des packages nécessaires
+import re
+from Bio import SeqIO
+import os
+import pandas as pd
+
+#Software :
+Clustal_Omega="/beegfs/home/soukkal/miniconda3/bin/clustalo"
+Trimal="/beegfs/home/soukkal/miniconda3/bin/trimal"
+
+# Définition des chemins
+Cluster_seqs_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Clustering/Filtered_Clusters/Clusters_fasta/"
+Cluster_alignment_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Alignment_Phylogenies/Alignement/"
+
+# Liste des clusters à aligner
+Clusters_to_align = pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Clustering/Filtered_Clusters/Clusters_to_align_and_trim.txt", header=None)
+list_Clusters_to_align = list(Clusters_to_align[0])
+
+# Règle pour aligner les clusters
+rule all:
+    input:
+        expand(Cluster_alignment_path+"{cluster_ali}.faa.aln", cluster_ali=list_Clusters_to_align),
+        expand(Cluster_alignment_path+"{cluster_ali}.faa.aln.trimmed", cluster_ali=list_Clusters_to_align)
+
+# Règle pour aligner les clusters
+rule Alignment:
+    params:
+        threads="5",
+        time="10:00:00",
+        mem="5G",
+        name="Cluster_alignment_{cluster_ali}",
+        out=Cluster_alignment_path+"Logs/Clustal_run_{cluster_ali}.out",
+        err=Cluster_alignment_path+"Logs/Clustal_run_{cluster_ali}.err"
+    input:
+        Cluster_file=Cluster_seqs_path+"{cluster_ali}.faa"
+    output:
+        alignment_file=Cluster_alignment_path+"{cluster_ali}.faa.aln",
+        trimmed_alignment=Cluster_alignment_path+"{cluster_ali}.faa.aln.trimmed"
+    shell:
+        """
+        {Clustal_Omega} -i {input.Cluster_file} --out {output.alignment_file} --threads {params.threads}
+        #Etape de trimming pour réduire la taille de l'alignement
+        {Trimal} -in {output.alignment_file} -out {output.trimmed_alignment} -automated1
+        """
+

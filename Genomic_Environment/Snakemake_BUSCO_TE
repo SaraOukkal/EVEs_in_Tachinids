@@ -1,0 +1,66 @@
+import pandas as pd
+import re 
+import os
+
+#Dry Run :
+#nohup snakemake -j 200 -s Snakemake_BUSCO_TE -n --cluster "sbatch -J {params.name} -p normal " &> nohup_Snakemake_Env.txt &
+#Unlock :
+#nohup snakemake -j 200 -s Snakemake_BUSCO_TE --unlock --cluster "sbatch -J {params.name} -p normal " &> nohup_Snakemake_Env.txt &
+#Real run :
+#nohup snakemake -j 200 -s Snakemake_BUSCO_TE --cluster "sbatch -J {params.name} -p normal " &> nohup_Snakemake_Env.txt &
+
+#Pathways : 
+BUSCO_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Stats/BUSCO/"
+TE_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Genomic_environment/TE/"
+Output_dir_BUSCO="/beegfs/data/soukkal/Thesis/Tachinid_Project/Stats/BUSCO/Scaffolds_BUSCO_Count/"
+Logs_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Genomic_environment/Depth/Diptera_mappings/Logs/"
+Scripts_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Scripts/Genomic_environment/"
+
+#Species list :
+Genome_IDS_table=pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/All_species_list.txt",header=None)
+list_Genome_IDs=list(Genome_IDS_table[0])
+
+rule all : 
+    input:
+        expand(Output_dir_BUSCO+"{Genome_ID}_scaffold_BUSCO_count.tsv", Genome_ID = list_Genome_IDs),
+        expand(TE_dir+"TE_count/{Genome_ID}_scaffold_count.tsv", Genome_ID = list_Genome_IDs)
+
+
+##BUSCO Part : 
+
+rule BUSCO_count : 
+    params:
+        partition="normal",
+        name="BUSCO_count_{Genome_ID}",
+    input:
+        BUSCO_file=BUSCO_dir+"{Genome_ID}/run_diptera_odb10/full_tabcd le.tsv"
+    output:
+        BUSCO_count=Output_dir_BUSCO+"{Genome_ID}_scaffold_BUSCO_count.tsv"
+    shell:
+        """
+        # Lire le contenu du fichier full_table.tsv en ignorant les lignes commençant par '#', récup la colonne scaffolds, trier, compter le nombre d'occurences uniques, retirer les espaces de début de ligne, et inverser les deux colonnes 
+        grep -v '^#' {input.BUSCO_file} | cut -f3 | sort | uniq -c | sed 's/^[ \t]*//' | awk '{{print $2"\t"$1}}' > {output.BUSCO_count}
+        """
+
+##TE Part : 
+
+rule TE_count : 
+    params:
+        partition="normal",
+        name="TE_count_{Genome_ID}",
+    input:
+        Blast_file=TE_dir+"{Genome_ID}/result_mmseqs2.m8"
+    output:
+        TE_count=TE_dir+"TE_count/{Genome_ID}_scaffold_count.tsv"
+    shell:
+        """
+        mkdir -p {TE_dir}/TE_positions/
+        mkdir -p {TE_dir}/TE_count/
+        python3 {Scripts_dir}TE_positions.py -i {input.Blast_file} -o {TE_dir}/TE_positions/{wildcards.Genome_ID}_TE_hits.bed
+        bash {Scripts_dir}TE_merge_overlaps.sh {TE_dir}/TE_positions/{wildcards.Genome_ID}_TE_hits.bed {TE_dir}/TE_positions/{wildcards.Genome_ID}_TE_no_overlaps.bed
+        python3 {Scripts_dir}TE_count_per_scaffold.py -i {TE_dir}/TE_positions/{wildcards.Genome_ID}_TE_no_overlaps.bed -o {output.TE_count}
+        """
+
+
+
+

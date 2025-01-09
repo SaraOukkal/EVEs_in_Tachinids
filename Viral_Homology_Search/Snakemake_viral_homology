@@ -1,0 +1,129 @@
+#Note : This SnakeFile allows to conduct a sequence homology analysis in which eukaryotic genomes (here diptera) are the queries and the database is all viral proteins.
+#Each viral hit overlap is then used to define candidate loci for viral endogenization.
+
+#Dryrun : 
+#nohup snakemake -j 200 -s Snakemake_viral_homology -n --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads}  -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_viral_homology.out &
+#Unlock : 
+#nohup snakemake -j 200 -s Snakemake_viral_homology --unlock --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads}  -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_viral_homology.out &
+#Real run : 
+#nohup snakemake -j 200 -s Snakemake_viral_homology --cluster "sbatch -J {params.name} -p normal --cpus-per-task  {params.threads}  -o {params.out} -e {params.err} --constraint=haswell --exclude=pbil-deb27 " &> nohup_Snakemake_viral_homology.out &
+
+import pandas as pd
+import re
+import os
+
+#Your softs
+mmseqs2="/beegfs/data/soukkal/TOOLS/mmseqs/bin/mmseqs" #(version 5daca424b162cc5fdf0b9cd151aebed86975cbf6)
+
+#Your paths
+Genomes_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Assembly/Genomes/"
+Output_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Homology_search/"
+Scripts_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Scripts/Viral_Homology/"
+DB_dir="/beegfs/data/soukkal/Thesis/Databases/"
+Logs_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Homology_search/Logs/"
+
+#List of all names regrouped 
+Genome_IDS_table=pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/All_species_list.txt",header=None)
+list_Genome_IDs=list(Genome_IDS_table[0])
+
+#This rule contains all the expected output from all your rules within the snakefile
+rule all:
+        input:
+                DB_dir+"Refseq_viral_db_nophages_noPDV_dEVE_FV",
+                expand(Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2.m8", Genome_ID = list_Genome_IDs),
+                expand(Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2_strand_V.m8", Genome_ID = list_Genome_IDs),
+                expand(Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2_strand_summary_V.bed", Genome_ID = list_Genome_IDs),
+                expand(Output_dir+"{Genome_ID}/Fasta_viral_loci.fna", Genome_ID = list_Genome_IDs),
+                expand(Output_dir+"{Genome_ID}/Fasta_viral_loci.faa", Genome_ID = list_Genome_IDs)
+
+#First create the viral db :
+rule Create_viral_db:
+        params:
+                threads="1",
+                time="00:10:00",
+                name="CreateDB",
+                mem="2000M",
+                out=Logs_dir+"CreateDB.out",
+                err=Logs_dir+"CreateDB.error"
+        input:
+                Viraldb=DB_dir+"Refseq_viral_db_nophages_noPDV_dEVE_FV.faa"
+        output:
+                Viral_mmseqs2_db=DB_dir+"Refseq_viral_db_nophages_noPDV_dEVE_FV"
+        shell:
+                """
+                {mmseqs2} createdb {input.Viraldb} {output.Viral_mmseqs2_db}
+                """
+
+#Then run the BlastX (Mmseqs2) with Genomes as queries and Virus db as database
+rule Homology_analysis:
+        params:
+                threads="10",
+                time="48:00:00",
+                mem="5G",
+                name="Mmseqs2_{Genome_ID}",
+                out=Logs_dir+"{Genome_ID}_Mmseqs2_viral_search.out",
+                err=Logs_dir+"{Genome_ID}_Mmseqs2_viral_search.error"
+        input:
+                Viraldb=DB_dir+"Refseq_viral_db_nophages_noPDV_dEVE_FV",
+                Genomedb=Genomes_dir+"{Genome_ID}.fa"
+        output:
+                out=Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2.m8"
+        shell:
+                """
+                #Create a directory where the BlastX results will be written
+                mkdir -p {Output_dir}{wildcards.Genome_ID}/run_mmseqs2/
+                #Create the query database (for each query genome/sequence)
+                {mmseqs2} createdb {input.Genomedb} {Output_dir}{wildcards.Genome_ID}/run_mmseqs2/{wildcards.Genome_ID}_mmseqs2_db
+                #Run Mmseqs2 search (BlastX equivalent, homology search between query and db)
+                {mmseqs2} search {Output_dir}{wildcards.Genome_ID}/run_mmseqs2/{wildcards.Genome_ID}_mmseqs2_db {input.Viraldb} {Output_dir}{wildcards.Genome_ID}/run_mmseqs2/result_mmseqs2 {Output_dir}{wildcards.Genome_ID}/run_mmseqs2/tpm -a -s 7.5 -e 0.01 --threads 10 --remove-tmp-files
+                #From the previous step you get one result file per thread, the next step will format the result column and also put together all the results in one file:
+                {mmseqs2} convertalis --format-output 'query,qlen,tlen,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,qaln,tcov' {Output_dir}{wildcards.Genome_ID}/run_mmseqs2/{wildcards.Genome_ID}_mmseqs2_db {input.Viraldb} {Output_dir}{wildcards.Genome_ID}/run_mmseqs2/result_mmseqs2 {output.out}
+                """
+
+#Define_loci by first changing the strand of the results (hits on antisens strand changed to sens strand coordinates)
+#And then use the script Overlapping_sequences_BUSCO_Viral_loci2.R to merge overlapping hits with GenomicRanges
+
+rule Define_loci:
+        params:
+                threads="3",
+                time="08:00:00",
+                mem="2000M",
+                name="Define_loci_{Genome_ID}",
+                out=Logs_dir+"Define_loci_{Genome_ID}.out",
+                err=Logs_dir+"Define_loci_{Genome_ID}.error"
+        input:
+                Blast_tab=Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2.m8"
+        output:
+                out1=Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2_strand_V.m8",
+                out2=Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2_strand_summary_V.bed"
+        shell:
+                """
+                python3 {Scripts_dir}Make_change_strand_mmseqs.py -b {input.Blast_tab} -o {output.out1} -t virus
+                /beegfs/data/soft/R-4.3.1/bin/Rscript {Scripts_dir}Overlapping_sequences_BUSCO_Viral_loci2.R {output.out1} {output.out2}
+                """
+
+#Extract candidates loci based on their coordinates on genomes
+rule Extract_translate_loci:
+        params:
+                threads="2",
+                time="00:15:00",
+                mem="2000M",
+                name="Extract_translate_{Genome_ID}",
+                out=Logs_dir+"Extract_translate_{Genome_ID}.out",
+                err=Logs_dir+"Extract_translate_{Genome_ID}.error"
+        input:
+                Bed=Output_dir+"{Genome_ID}/run_mmseqs2/result_mmseqs2_strand_summary_V.bed",
+                Genome=Genomes_dir+"{Genome_ID}.fa"
+        output:
+                Loci_dna=Output_dir+"{Genome_ID}/Fasta_viral_loci.fna",
+                Loci_aa=Output_dir+"{Genome_ID}/Fasta_viral_loci.faa"
+        shell:
+                """
+                #Python script that extracts sequence from candidate loci coordinates and translate it into aa :
+                python3 {Scripts_dir}Extract_and_translate_loci.py -g {input.Genome} -b {input.Bed} -aa {output.Loci_aa} -dna {output.Loci_dna} -sp {wildcards.Genome_ID}
+                #mkdir {Output_dir}Viral_loci/ #If it doesnt exist
+                #Put all loci Fasta sequences into one unique file :
+                cat {output.Loci_aa} >> {Output_dir}Viral_loci/Candidate_viral_loci_and_viral_protein.aa
+                cat {output.Loci_aa} >> {Output_dir}Viral_loci/All_fasta_viral_loci.faa
+                cat {output.Loci_dna} >> {Output_dir}Viral_loci/All_fasta_viral_loci.fna
+                """

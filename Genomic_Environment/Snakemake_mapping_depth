@@ -1,0 +1,119 @@
+#Commande :
+#conda activate /beegfs/data/bguinet/Bguinet_conda/
+#
+#
+####Dry RUN command :
+#nohup snakemake -j 200 -s Snakemake_mapping_depth -n --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --constraint='haswell|broadwell|skylake' --exclude=pbil-deb27 " &> nohup_Snakemake_Mapping_depth.out &
+#
+####Unlock command :
+#nohup snakemake -j 200 -s Snakemake_mapping_depth --unlock --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --constraint='haswell|broadwell|skylake' --exclude=pbil-deb27 "  &> nohup_Snakemake_Mapping_depth.out &
+#
+####Real command :
+#nohup snakemake -j 200 -s Snakemake_mapping_depth --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --constraint='haswell|broadwell|skylake' --exclude=pbil-deb27 " &> nohup_Snakemake_Mapping_depth.out &
+
+import pandas as pd
+import re 
+import os
+
+#Your paths
+Genomes_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Assembly/Genomes/"
+Reads_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Assembly/Reads/"
+Output_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Genomic_environment/Depth/Diptera_mappings/"
+logs_dir="/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Genomic_environment/Depth/Diptera_mappings/Logs/"
+
+#Softwares : 
+bwamem2="/beegfs/home/soukkal/miniconda3/bin/bwa-mem2.avx2"
+samtools="/beegfs/data/soft/samtools-1.19/bin/samtools"
+
+Genome_IDS_table=pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/Species_list_diptera.txt",header=None)
+list_Genome_IDs=list(Genome_IDS_table[0])
+
+rule all:
+        input:
+                expand(logs_dir+"{Genome_ID}_index_done.txt", Genome_ID = list_Genome_IDs),
+                expand(Output_dir+"BAM/{Genome_ID}.bam.gz", Genome_ID = list_Genome_IDs),
+                expand(Output_dir+"BED/{Genome_ID}.per-base.bed.gz", Genome_ID = list_Genome_IDs),
+                expand(Output_dir+"COV/{Genome_ID}.cov", Genome_ID = list_Genome_IDs)
+
+rule index_genome:
+    params:
+        threads="8",
+        partition="normal",
+        time="03:00:00",
+        mem="32G",
+        name="Index_{Genome_ID}",
+        out=logs_dir+"{Genome_ID}_index.out",
+        err=logs_dir+"{Genome_ID}_index.error"
+    input:
+        Genome=Genomes_dir+"{Genome_ID}.fa"
+    output:
+        flag=logs_dir+"{Genome_ID}_index_done.txt"
+    shell:
+        """
+        {bwamem2} index {input.Genome}
+        touch {output.flag}
+        """
+
+rule Mapping:
+    params:
+        threads="8",
+        partition="normal",
+        time="24:00:00",
+        mem="32G",
+        name="Mapping_{Genome_ID}",
+        out=logs_dir+"{Genome_ID}_map.out",
+        err=logs_dir+"{Genome_ID}_map.error"
+    input:
+        flag=logs_dir+"{Genome_ID}_index_done.txt",
+        Genome=Genomes_dir+"{Genome_ID}.fa",
+        R1=Reads_dir+"{Genome_ID}_1.fastq.gz",
+        R2=Reads_dir+"{Genome_ID}_2.fastq.gz"
+    output:
+        BAM_zipped=Output_dir+"BAM/{Genome_ID}.bam.gz"
+    shell:
+        """
+        {bwamem2} mem -t 8 {input.Genome} {input.R1} {input.R2} > {Output_dir}BAM/{wildcards.Genome_ID}.bam
+        gzip {Output_dir}BAM/{wildcards.Genome_ID}.bam
+        """
+
+rule Depth:
+    params:
+        threads="8",
+        partition="normal",
+        time="24:00:00",
+        mem="8G",
+        name="Depth_{Genome_ID}",
+        out=logs_dir+"{Genome_ID}_depth.out",
+        err=logs_dir+"{Genome_ID}_depth.error"
+    input:
+        BAM=Output_dir+"BAM/{Genome_ID}.bam.gz"
+    output:
+        BED=Output_dir+"BED/{Genome_ID}.per-base.bed.gz"
+    shell:
+        """
+        {samtools} sort {input.BAM} -l 1 -o {Output_dir}BAM/{wildcards.Genome_ID}_sorted.bam.gz
+        {samtools} depth -a {Output_dir}BAM/{wildcards.Genome_ID}_sorted.bam.gz > {Output_dir}BED/{wildcards.Genome_ID}.per-base.bed
+        gzip {Output_dir}BED/{wildcards.Genome_ID}.per-base.bed
+        rm {Output_dir}BAM/{wildcards.Genome_ID}_sorted.bam.gz
+        """
+
+rule Mean_depth:
+    params:
+        threads="4",
+        partition="normal",
+        time="24:00:00",
+        mem="1G",
+        name="Cov_{Genome_ID}",
+        out=logs_dir+"{Genome_ID}_cov.out",
+        err=logs_dir+"{Genome_ID}_cov.error"
+    input:
+        BAM=Output_dir+"BAM/{Genome_ID}.bam.gz"
+    output:
+        Cov=Output_dir+"COV/{Genome_ID}.cov"
+    shell:
+        """
+        hostname
+        {samtools} sort {input.BAM} -l 1 -o {Output_dir}BAM/{wildcards.Genome_ID}_sorted2.bam.gz
+        {samtools} coverage -o {output.Cov} {Output_dir}BAM/{wildcards.Genome_ID}_sorted2.bam.gz
+        rm {Output_dir}BAM/{wildcards.Genome_ID}_sorted2.bam.gz
+        """

@@ -1,0 +1,59 @@
+#Activate conda :
+## conda activate /beegfs/data/bguinet/Bguinet_conda
+
+#Command lines :
+##DRY run :
+#nohup snakemake -j 500  -s Snakemake_phylogenyML_clusters -n --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon  --exclude=pbil-deb27 " &> nohup_Snakemake_MLCluster_phylo.out &
+##Unlock :
+#nohup snakemake -j 500  -s Snakemake_phylogenyML_clusters --unlock --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_MLCluster_phylo.out &
+##Real run :
+#nohup snakemake -j 500  -s Snakemake_phylogenyML_clusters --cluster " sbatch -J {params.name} -t {params.time} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb27 " &> nohup_Snakemake_MLCluster_phylo.out &
+
+# Importation des packages nécessaires
+import re
+from Bio import SeqIO
+import os
+import pandas as pd
+
+#Software :
+Iqtree="/beegfs/home/soukkal/miniconda3/bin/iqtree"
+
+# Définition des chemins
+Cluster_alignment_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Alignment_Phylogenies/Alignement/"
+Cluster_phylogeny_path = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Alignment_Phylogenies/Phylogeny/"
+
+# Liste des clusters pour la phylogénie ML
+Clusters_PhyML = pd.read_csv("/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Clustering/Filtered_Clusters/Clusters_phylogeny.txt", header=None)
+list_Clusters_PhyML = list(Clusters_PhyML[0])
+
+rule all:
+    input:
+        expand(Cluster_phylogeny_path+"{cluster_phyML}.faa.aln.trimmed.treefile", cluster_phyML=list_Clusters_PhyML)
+
+# Rule pour la phylogénie par maximum de vraisemblance pour les clusters < 500 séquences
+rule PhylogenyML_less500:
+    params:
+        threads="12",
+        time="96:00:00",
+        mem="50G",
+        name="PhyML_{cluster_phyML}",
+        out=Cluster_phylogeny_path+"Logs/PhyML_{cluster_phyML}.out",
+        err=Cluster_phylogeny_path+"Logs/PhyML_{cluster_phyML}.error"
+    input:
+        alignment_file=Cluster_alignment_path+"{cluster_phyML}.faa.aln.trimmed"
+    output:
+        tree_file=Cluster_phylogeny_path+"{cluster_phyML}.faa.aln.trimmed.treefile"
+    shell:
+        """
+        {Iqtree} -s {input.alignment_file} -m MFP -alrt 1000 -T AUTO -ntmax 12
+        #Move since iqtree write files into the same dir as the alignment
+        cd {Cluster_alignment_path}
+        mv {wildcards.cluster_phyML}.faa.aln.trimmed.model.gz {Cluster_phylogeny_path}
+        mv {wildcards.cluster_phyML}.faa.aln.trimmed.mldist {Cluster_phylogeny_path}
+        mv {wildcards.cluster_phyML}.faa.aln.trimmed.bionj {Cluster_phylogeny_path}
+        mv {wildcards.cluster_phyML}.faa.aln.trimmed.treefile {Cluster_phylogeny_path}
+        mv {wildcards.cluster_phyML}.faa.aln.trimmed.log {Cluster_phylogeny_path}
+        mv {wildcards.cluster_phyML}.faa.aln.trimmed.iqtree {Cluster_phylogeny_path}
+        mv {wildcards.cluster_phyML}.faa.aln.trimmed.ckp.gz {Cluster_phylogeny_path}
+        """
+

@@ -1,0 +1,119 @@
+# Snakemake Workflow: Snakemake_Synteny_domesticated
+
+# Command:
+# conda activate /beegfs/data/bguinet/Bguinet_conda/
+#
+#### Dry RUN command:
+# nohup snakemake -j 200 -s Snakemake_Synteny_domesticated -n --cluster "sbatch -J {params.name} -p normal -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb[14-27] " &> nohup_Snakemake_Synteny_domesticated.out &
+#
+#### Unlock command:
+# nohup snakemake -j 200 -s Snakemake_Synteny_domesticated --unlock --cluster "sbatch -J {params.name} -p normal -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb[14-27] "  &> nohup_Snakemake_Synteny_domesticated.out &
+#
+#### Real command:
+# nohup snakemake -j 200 -s Snakemake_Synteny_domesticated --cluster "sbatch -J {params.name} -p normal -t {params.time} --mem {params.mem} --cpus-per-task {params.threads} -o {params.out} -e {params.err} --qos=horizon --exclude=pbil-deb[14-27] " &> nohup_Snakemake_Synteny_domesticated.out &
+
+# Import Python packages
+import os
+import pandas as pd
+
+# Data paths
+Clusters_list = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Synteny_Domesticated/Domesticated_clusters_list.txt"
+Clusters_fasta = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Clustering/Filtered_Clusters/Clusters_fasta/"
+Genomes = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Assembly/Genomes/"
+Metaeuk = "/beegfs/project/horizon/bin/miniconda3/bin/metaeuk"
+Database = "/beegfs/project/horizon/db/UniRef/UniRef_insecta90_viruses90_bacteria50.fa"
+Output_dir = "/beegfs/data/soukkal/Thesis/Tachinid_Project/Results/Synteny_Domesticated/"
+Log_dir = Output_dir + "Logs/"
+
+# Load clusters
+Clusters_table = pd.read_csv(Clusters_list, header=None)
+list_Clusters = list(Clusters_table[0])
+
+rule all:
+    input:
+        expand(Output_dir + "Filtered_fasta/{cluster}.faa", cluster=list_Clusters),
+        expand(Output_dir + "Flags/{cluster}_genes_predicted.flag", cluster=list_Clusters),
+        expand(Output_dir + "Synteny_report/synteny_report_{cluster}.csv", cluster=list_Clusters),
+        expand(Output_dir + "Synteny_report/synteny_groups_{cluster}.csv", cluster=list_Clusters)
+
+# Filter insect sequences
+rule filter_insect_sequences:
+    input:
+        fasta_file=Clusters_fasta + "{cluster}.faa"
+    output:
+        filtered_fasta=Output_dir + "Filtered_fasta/{cluster}.faa"
+    params:
+        threads="1",
+        time="00:10:00",
+        name="filter_sequences_{cluster}",
+        mem="2000M",
+        out=Log_dir + "filter_sequences_{cluster}.out",
+        err=Log_dir + "filter_sequences_{cluster}.err"
+    shell:
+        """
+        mkdir -p {Output_dir}Filtered_fasta
+        grep ':' {input.fasta_file} > {output.filtered_fasta}
+        """
+
+# Extract scaffolds per cluster
+rule extract_scaffolds:
+    input:
+        filtered_fasta=Output_dir + "Filtered_fasta/{cluster}.faa"
+    output:
+        flag=Output_dir + "Flags/{cluster}_scaffolds_extracted.flag"
+    params:
+        threads="1",
+        time="00:30:00",
+        name="extract_scaffolds_{cluster}",
+        mem="4000M",
+        out=Log_dir + "extract_scaffolds_{cluster}.out",
+        err=Log_dir + "extract_scaffolds_{cluster}.err"
+    shell:
+        """
+        mkdir -p {Output_dir}Filtered_scaffolds {Output_dir}Flags
+        python extract_scaffolds.py --fasta {input.filtered_fasta} --output_dir {Output_dir}Filtered_scaffolds/{wildcards.cluster}/ --genome_dir {Genomes}
+        touch {output.flag}
+        """
+
+# Predict genes using Metaeuk
+rule predict_genes:
+    input:
+        flag=Output_dir + "Flags/{cluster}_scaffolds_extracted.flag"
+    output:
+        flag=Output_dir + "Flags/{cluster}_genes_predicted.flag"
+    params:
+        threads="8",
+        time="48:00:00",
+        name="predict_genes_{cluster}",
+        mem="120G",
+        temp_folder=Output_dir + "temp/{cluster}/",
+        out=Log_dir + "predict_genes_{cluster}.out",
+        err=Log_dir + "predict_genes_{cluster}.err"
+    shell:
+        """
+        mkdir -p {Output_dir}Flags {params.temp_folder}
+        python predict_genes.py --scaffolds_dir {Output_dir}Filtered_scaffolds/{wildcards.cluster}/ --output_dir {Output_dir}Predicted_genes/{wildcards.cluster}/ --db {Database} --metaeuk {Metaeuk} --temp_folder {params.temp_folder} --memory_limit 65G
+        touch {output.flag}
+        """
+
+# Compare synteny and group sequences
+rule compare_synteny:
+    input:
+        fasta=Output_dir + "Filtered_fasta/{cluster}.faa",
+        flag=Output_dir + "Flags/{cluster}_genes_predicted.flag"
+    output:
+        report=Output_dir + "Synteny_report/synteny_report_{cluster}.csv",
+        groups=Output_dir + "Synteny_report/synteny_groups_{cluster}.csv"
+    params:
+        threads="1",
+        time="01:00:00",
+        name="compare_synteny_{cluster}",
+        mem="8000M",
+        out=Log_dir + "compare_synteny_{cluster}.out",
+        err=Log_dir + "compare_synteny_{cluster}.err"
+    shell:
+        """
+        mkdir -p {Output_dir}Synteny_report
+        python compare_synteny.py --fasta {input.fasta} --predicted_genes_dir {Output_dir}Predicted_genes/{wildcards.cluster}/ --output {output.report} --groups_output {output.groups}
+        """
+
