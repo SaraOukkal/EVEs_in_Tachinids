@@ -139,14 +139,13 @@ Identify, validate, cluster, and analyze viral elements integrated into the geno
 7. **Synteny Analysis of Domesticated Sequences**
    - **Pipeline:** `Snakemake_Synteny_domesticated`
    - **Scripts:**
-     - `filter_insect_sequences.py`: Extracts insect-specific sequences from cluster FASTA files based on headers.
      - `extract_scaffolds.py`: Identifies and extracts scaffolds containing the sequences of interest.
      - `predict_genes.py`: Uses Metaeuk to predict gene models from extracted scaffolds. Generates output in GFF and FASTA formats.
      - `compare_synteny.py`: Identifies upstream and downstream genes and compares synteny across species.
+     - `Make_synteny_summary.py`: Makes a summary of synteny results 
    - **Tools:**
      - Metaeuk for gene prediction (`--min-length 33`, `--compressed 1`).
    - **Description:** This step determines whether domesticated sequences share conserved genomic contexts across species, indicating shared integration sites and evolutionary relationships.
-
 ---
 
 ## Statistical Tests
