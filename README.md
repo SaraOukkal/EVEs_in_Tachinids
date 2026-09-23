@@ -11,7 +11,7 @@ Assemble genomes, compute quality metrics, and infer phylogeny to establish the 
 
 ### Scripts and Steps
 
-1. **Genome Assembly**
+1. **Genomes Assembly**
    - **Script:** `Snakemake_Assembly`
    - **Input:** Illumina reads
    - **Output:** Assembled genomes
@@ -27,7 +27,7 @@ Assemble genomes, compute quality metrics, and infer phylogeny to establish the 
      - BUSCO (v5.4.5) with the `--mode genome` option and `--lineage diptera_odb10` dataset.
      - QUAST (v5.0.2).
 
-3. **Phylogenetic Inference**
+3. **Species Phylogeny**
    - **Scripts:**
      - `BUSCO_phylogeny_choose_genes.sh`: Selects 300 conserved BUSCO genes.
      - `Snakemake_BUSCO_phylogeny`: Performs alignment, trimming, and tree construction.
@@ -49,7 +49,7 @@ Identify, validate, cluster, and analyze viral elements integrated into the geno
 
 ### Scripts and Steps
 
-#### Homology Search
+#### Viral Homology Search
 
 1. **Identification of Candidate Loci**
    - **Pipeline:** `Snakemake_viral_homology`
@@ -146,21 +146,4 @@ Identify, validate, cluster, and analyze viral elements integrated into the geno
    - **Tools:**
      - Metaeuk for gene prediction (`--min-length 33`, `--compressed 1`).
    - **Description:** This step determines whether domesticated sequences share conserved genomic contexts across species, indicating shared integration sites and evolutionary relationships.
----
 
-## Statistical Tests
-
-### Objective
-Analyze the impact of lifestyle and data quality on the detection and domestication of EVEs.
-
-### Scripts and Steps
-
-1. **Lifestyle Effect**
-   - **Script:** `Statistical_test_Diptera_Tachinidae.R`
-   - **Description:** Phylogenetic generalized linear mixed model (PGLMM) to test whether parasitoids have more EVEs than free-living species.
-
-2. **Data Quality Impact**
-   - **Script:** `Statistical_test_genome_quality.R`
-   - **Description:** Compares Horizon and DTOL genomes to evaluate the effect of data quality on EVE detection and validation.
-
----
